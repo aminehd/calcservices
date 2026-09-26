@@ -1,6 +1,7 @@
 import json
 import os
 import threading
+import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -29,7 +30,39 @@ def load_routes():
     return ops
 
 
+def show_my_envoy(attempts=10):
+    for n in range(attempts):
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:9901/config_dump", timeout=3) as r:
+                dump = json.load(r)
+        except Exception as exc:
+            print(f"sidecar admin not up yet ({type(exc).__name__}), retrying", flush=True)
+            time.sleep(1)
+            continue
+
+        listeners, clusters = [], []
+        for cfg in dump.get("configs", []):
+            for item in cfg.get("static_listeners", []) + cfg.get("dynamic_listeners", []):
+                addr = item.get("listener", {}).get("address", {}).get("socket_address", {})
+                if addr:
+                    listeners.append(f"{addr.get('address')}:{addr.get('port_value')}")
+            for item in cfg.get("static_clusters", []) + cfg.get("dynamic_active_clusters", []):
+                c = item.get("cluster", {})
+                ep = c.get("load_assignment", {}).get("endpoints", [{}])[0].get("lb_endpoints", [{}])[0]
+                sock = ep.get("endpoint", {}).get("address", {}).get("socket_address", {})
+                clusters.append(f"{c.get('name')}->{sock.get('address')}:{sock.get('port_value')}")
+
+        if listeners or clusters:
+            print(f"my envoy listens on {', '.join(listeners)}", flush=True)
+            print(f"my envoy knows {', '.join(clusters)}", flush=True)
+            return
+        print(f"sidecar config still empty (try {n + 1})", flush=True)
+        time.sleep(1)
+    print("gave up reading my sidecar config", flush=True)
+
+
 ROUTES = load_routes()
+show_my_envoy()
 
 
 def calculate(req):
