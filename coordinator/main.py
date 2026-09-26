@@ -1,25 +1,49 @@
 import json
 import os
 import threading
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = int(os.environ.get("PORT", "8081"))
-WORKERS = int(os.environ.get("WORKERS", "3"))
-DIM = 4
+CALC_URL = os.environ.get("CALC_URL", "http://127.0.0.1:9001")
+CONTROL_PLANE_URL = os.environ.get("CONTROL_PLANE_URL", "http://controlplane:18000")
 
 lock = threading.Lock()
-state = {"step": 0, "weights": [0.0] * DIM, "reports": {}}
+state = {"done": 0, "per_op": {}}
 
 
-def current_weights():
-    return {"step": state["step"], "weights": state["weights"]}
+def post(path, body):
+    req = urllib.request.Request(
+        CALC_URL + path,
+        data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=5) as r:
+        return json.load(r)
 
 
-def record(worker, grad):
-    """TODO: store this worker's grad. When all WORKERS have reported,
-    average the grads, add them to state["weights"], bump state["step"],
-    and clear the reports. Return how many are still missing."""
-    return WORKERS
+def load_routes():
+    with urllib.request.urlopen(CONTROL_PLANE_URL + "/snapshot", timeout=3) as r:
+        ops = json.load(r)["ops"]
+    print(f"routes from control plane: {ops}", flush=True)
+    return ops
+
+
+ROUTES = load_routes()
+
+
+def calculate(req):
+    """TODO: req is {"op": "add", "a": 6, "b": 7}.
+    1. look up ROUTES[req["op"]] to get the path
+    2. post({"a": ..., "b": ...}) to it
+    3. return the reply"""
+    path = ROUTES[req["op"]]
+    return post(path, {"a": req["a"], "b": req["b"]})
+
+
+def tally(op):
+    state["done"] += 1
+    state["per_op"][op] = state["per_op"].get(op, 0) + 1
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -34,20 +58,25 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
             self._send({"ok": True})
-            return
-        with lock:
-            self._send(current_weights())
+        else:
+            with lock:
+                self._send(dict(state))
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
-        msg = json.loads(self.rfile.read(length) or b"{}")
+        req = json.loads(self.rfile.read(length) or b"{}")
+        try:
+            reply = calculate(req)
+        except Exception as exc:
+            self._send({"error": f"{type(exc).__name__}: {exc}"}, 502)
+            return
         with lock:
-            waiting = record(msg.get("worker", "?"), msg.get("grad", [0.0] * DIM))
-            self._send({"step": state["step"], "waiting": waiting})
+            tally(req.get("op", "?"))
+        self._send(reply)
 
     def log_message(self, *args):
         pass
 
 
-print(f"coordinator up on {PORT}, barrier of {WORKERS}", flush=True)
+print(f"coordinator up on {PORT}, calculators via {CALC_URL}", flush=True)
 ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

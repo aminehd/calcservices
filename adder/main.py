@@ -7,9 +7,7 @@ NAME = "adder"
 
 
 def compute(a, b):
-    """TODO: return the result. adder: a + b"""
-    return 0
-
+    return a + b
 
 class Handler(BaseHTTPRequestHandler):
     def _send(self, obj, code=200):

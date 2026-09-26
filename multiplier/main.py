@@ -7,8 +7,7 @@ NAME = "multiplier"
 
 
 def compute(a, b):
-    """TODO: return the result. multiplier: a * b"""
-    return 0
+    return a * b
 
 
 class Handler(BaseHTTPRequestHandler):
