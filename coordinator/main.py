@@ -4,6 +4,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 WORKERS = int(os.environ.get("WORKERS", "3"))
+PORT = int(os.environ.get("PORT", "8081"))
 DIM = 4
 
 lock = threading.Lock()
@@ -50,5 +51,5 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-print(f"coordinator up, barrier of {WORKERS}", flush=True)
-ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
+print(f"coordinator up on {PORT}, barrier of {WORKERS}", flush=True)
+ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
