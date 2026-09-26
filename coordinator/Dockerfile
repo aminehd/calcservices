@@ -1,4 +1,4 @@
 FROM python:3.12-slim
 WORKDIR /app
-COPY . .
-CMD ["python", "coordinator/main.py"]
+COPY main.py .
+CMD ["python", "-u", "main.py"]
