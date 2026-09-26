@@ -3,12 +3,23 @@ import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-WORKERS = int(os.environ.get("WORKERS", "3"))
 PORT = int(os.environ.get("PORT", "8081"))
+WORKERS = int(os.environ.get("WORKERS", "3"))
 DIM = 4
 
 lock = threading.Lock()
 state = {"step": 0, "weights": [0.0] * DIM, "reports": {}}
+
+
+def current_weights():
+    return {"step": state["step"], "weights": state["weights"]}
+
+
+def record(worker, grad):
+    """TODO: store this worker's grad. When all WORKERS have reported,
+    average the grads, add them to state["weights"], bump state["step"],
+    and clear the reports. Return how many are still missing."""
+    return WORKERS
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -25,27 +36,14 @@ class Handler(BaseHTTPRequestHandler):
             self._send({"ok": True})
             return
         with lock:
-            self._send({"step": state["step"], "weights": state["weights"]})
+            self._send(current_weights())
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
         msg = json.loads(self.rfile.read(length) or b"{}")
         with lock:
-            state["reports"][msg.get("worker", "?")] = msg.get("grad", [0.0] * DIM)
-            waiting = WORKERS - len(state["reports"])
-            if waiting <= 0:
-                grads = list(state["reports"].values())
-                state["weights"] = [
-                    w + sum(g[i] for g in grads) / len(grads)
-                    for i, w in enumerate(state["weights"])
-                ]
-                state["step"] += 1
-                state["reports"] = {}
-                print(
-                    f"step {state['step']} weights {[round(w, 3) for w in state['weights']]}",
-                    flush=True,
-                )
-            self._send({"step": state["step"], "waiting": max(waiting, 0)})
+            waiting = record(msg.get("worker", "?"), msg.get("grad", [0.0] * DIM))
+            self._send({"step": state["step"], "waiting": waiting})
 
     def log_message(self, *args):
         pass

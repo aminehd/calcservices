@@ -1,6 +1,5 @@
 import json
 import os
-import random
 import socket
 import time
 import urllib.request
@@ -25,15 +24,21 @@ def post(path, obj):
         return json.load(r)
 
 
+def step():
+    """TODO: one training step.
+    1. weights = get("/weights")
+    2. sleep a little, this is the 'compute'
+    3. grad = DIM random numbers
+    4. post("/report", {"worker": ME, "grad": grad, "step": weights["step"]})
+    5. print what happened"""
+    get("/health")
+
+
 print(f"{ME} up, coordinator at {URL}", flush=True)
 while True:
     try:
-        weights = get("/weights")
-        time.sleep(0.2)
-        grad = [random.gauss(0, 0.1) for _ in range(DIM)]
-        reply = post("/report", {"worker": ME, "grad": grad, "step": weights["step"]})
-        print(f"{ME} reported at step {weights['step']} waiting {reply['waiting']}", flush=True)
-        time.sleep(1)
+        step()
+        print(f"{ME} ok", flush=True)
     except Exception as exc:
         print(f"{ME} retry after {type(exc).__name__}: {exc}", flush=True)
-        time.sleep(2)
+    time.sleep(1)
