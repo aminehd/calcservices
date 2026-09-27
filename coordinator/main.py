@@ -7,7 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = int(os.environ.get("PORT", "8081"))
 CALC_URL = os.environ.get("CALC_URL", "http://127.0.0.1:9001")
-CONTROL_PLANE_URL = os.environ.get("CONTROL_PLANE_URL", "http://controlplane:18000")
+ADMIN_URL = os.environ.get("ADMIN_URL", "http://127.0.0.1:9901")
 
 lock = threading.Lock()
 state = {"done": 0, "per_op": {}}
@@ -23,37 +23,27 @@ def post(path, body):
         return json.load(r)
 
 
-def load_routes():
-    with urllib.request.urlopen(CONTROL_PLANE_URL + "/snapshot", timeout=3) as r:
-        ops = json.load(r)["ops"]
-    print(f"routes from control plane: {ops}", flush=True)
-    return ops
-
-
 def show_my_envoy(attempts=10):
     for n in range(attempts):
         try:
-            with urllib.request.urlopen("http://127.0.0.1:9901/config_dump", timeout=3) as r:
-                dump = json.load(r)
+            with urllib.request.urlopen(ADMIN_URL + "/config_dump", timeout=3) as r:
+                configs = json.load(r).get("configs", [])
         except Exception as exc:
             print(f"sidecar admin not up yet ({type(exc).__name__}), retrying", flush=True)
             time.sleep(1)
             continue
 
-        listeners, clusters = [], []
-        for cfg in dump.get("configs", []):
-            for item in cfg.get("static_listeners", []) + cfg.get("dynamic_listeners", []):
-                addr = item.get("listener", {}).get("address", {}).get("socket_address", {})
-                if addr:
-                    listeners.append(f"{addr.get('address')}:{addr.get('port_value')}")
-            for item in cfg.get("static_clusters", []) + cfg.get("dynamic_active_clusters", []):
+        clusters, version = [], ""
+        for cfg in configs:
+            version = cfg.get("version_info", version)
+            for item in cfg.get("dynamic_active_clusters", []):
                 c = item.get("cluster", {})
-                ep = c.get("load_assignment", {}).get("endpoints", [{}])[0].get("lb_endpoints", [{}])[0]
-                sock = ep.get("endpoint", {}).get("address", {}).get("socket_address", {})
-                clusters.append(f"{c.get('name')}->{sock.get('address')}:{sock.get('port_value')}")
+                ep = c["load_assignment"]["endpoints"][0]["lb_endpoints"][0]
+                sock = ep["endpoint"]["address"]["socket_address"]
+                clusters.append(f"{c['name']}->{sock['address']}:{sock['port_value']}")
 
-        if listeners or clusters:
-            print(f"my envoy listens on {', '.join(listeners)}", flush=True)
+        if clusters:
+            print(f"my envoy config is dynamic (xds) version {version or '-'}", flush=True)
             print(f"my envoy knows {', '.join(clusters)}", flush=True)
             return
         print(f"sidecar config still empty (try {n + 1})", flush=True)
@@ -61,17 +51,8 @@ def show_my_envoy(attempts=10):
     print("gave up reading my sidecar config", flush=True)
 
 
-ROUTES = load_routes()
-show_my_envoy()
-
-
 def calculate(req):
-    """TODO: req is {"op": "add", "a": 6, "b": 7}.
-    1. look up ROUTES[req["op"]] to get the path
-    2. post({"a": ..., "b": ...}) to it
-    3. return the reply"""
-    path = ROUTES[req["op"]]
-    return post(path, {"a": req["a"], "b": req["b"]})
+    return post("/calc", req)
 
 
 def tally(op):
@@ -111,5 +92,7 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-print(f"coordinator up on {PORT}, calculators via {CALC_URL}", flush=True)
-ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+if __name__ == "__main__":
+    show_my_envoy()
+    print(f"coordinator up on {PORT}, calculators via {CALC_URL}", flush=True)
+    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

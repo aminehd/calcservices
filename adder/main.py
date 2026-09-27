@@ -30,5 +30,6 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-print(f"{NAME} up on {PORT}", flush=True)
-ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+if __name__ == "__main__":
+    print(f"{NAME} up on {PORT}", flush=True)
+    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
